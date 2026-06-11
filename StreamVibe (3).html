@@ -425,7 +425,7 @@ console.log('✅ Alitr Library cargada: TV '+ALITR_TV.length+' | Películas '+AL
     <div class="section-title" style="margin-bottom:0">🎬 Películas &amp; Series VOD</div>
     <div style="display:flex;gap:7px;flex-wrap:wrap;align-items:center">
       <label style="padding:5px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text2);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:5px" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--text)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text2)'">
-        📂 Archivo M3U <input type="file" accept=".m3u,.m3u8" style="display:none" onchange="loadVodM3U(this)">
+        📂 Archivo M3U <input type="file" accept=".m3u,.m3u8,.txt,*" style="display:none" onchange="loadVodM3U(this)">
       </label>
       <button onclick="toggleVodPanel()" style="padding:5px 12px;background:rgba(255,107,53,.12);border:1px solid rgba(255,107,53,.4);border-radius:var(--radius);color:var(--accent2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">📋 Listas VOD</button>
     </div>
@@ -1229,15 +1229,36 @@ function olProcessM3U(text,name){
     var ls=document.getElementById('ol-load-screen');
     if(ls) ls.style.display='none';
 
+    // Asegurar que el panel Oleada sea visible
+    var olApp = document.getElementById('ol-app') || document.getElementById('ol-iconbar');
+    if(olApp) olApp.style.display='';
+
     // Update title
     var panTitle=document.getElementById('ol-panel-title');
     if(panTitle) panTitle.textContent='📺 '+tv.length.toLocaleString()+' canales';
 
-    olSwitchView('tv');
-    showToast('✅ '+all.length.toLocaleString()+' títulos — '+name);
+    if(typeof showToast === 'function') showToast('✅ '+all.length.toLocaleString()+' títulos — '+name);
 
-    // Show continue
-    olRenderContinue();
+    // También sincronizar con Smarters Pro si está disponible
+    if(typeof smState !== 'undefined') {
+      try {
+        smState.channels = all.map(function(c){
+          return {name:c.name,logo:c.logo||'',group:c.group||'General',url:c.url,type:c.type,urls:[c.url]};
+        });
+        smState.filtered = smState.channels.filter(function(c){ return c.type==='tv'; });
+        smState.view = 'tv';
+        if(typeof renderChannelList==='function') renderChannelList(smState.filtered);
+        if(typeof buildCats==='function') buildCats(smState.filtered);
+        // Update Smarters title if visible
+        var smCount = document.getElementById('sm-list-count');
+        if(smCount) smCount.textContent = smState.filtered.length.toLocaleString()+' canales';
+      } catch(e){ console.warn('[Smarters sync]', e.message); }
+    }
+
+    setTimeout(function(){
+      try { olSwitchView('tv'); } catch(e) { console.warn('[olSwitchView]', e.message); }
+      try { olRenderContinue(); } catch(e) {}
+    }, 50);
   },80);
 }
 
@@ -1264,10 +1285,19 @@ window.olDrop=function(e){
   e.preventDefault();
   var z=document.getElementById('ol-drop-zone');if(z)z.style.borderColor='';
   var file=e.dataTransfer.files[0];
-  if(!file||!file.name.match(/\.m3u8?$/i)){showToast('⚠️ Solo archivos .m3u');return;}
+  if(!file){return;}
   olShowProgress(true,'Leyendo archivo...');
   var reader=new FileReader();
-  reader.onload=function(ev){olProcessM3U(ev.target.result,file.name);};
+  reader.onload=function(ev){
+    var text=ev.target.result;
+    if(!text.includes('#EXTINF')&&!text.includes('#EXTM3U')){
+      olShowProgress(false);
+      var s=document.getElementById('ol-status-m3u');
+      if(s)s.textContent='❌ El archivo no es una lista M3U válida';
+      return;
+    }
+    olProcessM3U(text,file.name);
+  };
   reader.readAsText(file,'UTF-8');
 };
 
@@ -1818,10 +1848,9 @@ function olInit(){
     var btn=document.getElementById('ol-saved-btn'); if(btn) btn.style.display='flex';
   }catch(e){}
 
-  // AUTO-LOAD ALITR LIBRARY si está disponible
+  // AUTO-LOAD ALITR LIBRARY — diferido hasta que la sección sea visible
   if(window.ALITR_TV && window.ALITR_MOVIES && window.ALITR_LOADED){
     console.log('🚀 Cargando Alitr Library precargada...');
-    // Merge TV + Movies into channel list
     var allChannels = [];
     window.ALITR_TV.forEach(function(c){
       allChannels.push({name:c.n,logo:c.l||'',group:c.g||'TV En Vivo',url:c.u,type:'tv',urls:[c.u]});
@@ -1832,24 +1861,28 @@ function olInit(){
 
     olState.channels = allChannels;
     olState.loaded = true;
-
-    // Build series map placeholder
     olState.seriesMap = {};
 
-    // Hide load screen and show content
-    var ls=document.getElementById('ol-load-screen');
-    if(ls) ls.style.display='none';
+    // Diferir el render hasta que la sección #s-tv sea visible
+    function _alitrRender(){
+      var ls=document.getElementById('ol-load-screen');
+      if(ls) ls.style.display='none';
+      var pt=document.getElementById('ol-panel-title');
+      if(pt) pt.textContent='📺 '+window.ALITR_TV.length.toLocaleString()+' canales';
+      try{ olSwitchView('tv'); }catch(e){ console.warn('[Alitr render]',e.message); }
+      if(typeof showToast==='function') showToast('✅ Alitr Library — '+allChannels.length.toLocaleString()+' títulos');
+      olState.seriesLoading = true;
+      setTimeout(olLoadSeriesBackground, 2000);
+    }
 
-    // Update panel title
-    var pt=document.getElementById('ol-panel-title');
-    if(pt) pt.textContent='📺 '+window.ALITR_TV.length.toLocaleString()+' canales';
-
-    olSwitchView('tv');
-    showToast('✅ Alitr Library — '+allChannels.length.toLocaleString()+' títulos cargados');
-
-    // Lazy-load series in background
-    olState.seriesLoading = true;
-    setTimeout(olLoadSeriesBackground, 2000);
+    // Si la sección ya es visible, renderizar ahora; si no, esperar a que se active
+    var stv = document.getElementById('s-tv');
+    if(stv && (stv.classList.contains('active') || stv.style.display !== 'none')){
+      setTimeout(_alitrRender, 100);
+    } else {
+      // Guardar para llamar cuando el usuario vaya a esa sección
+      window._pendingAlitrRender = _alitrRender;
+    }
   }
 
   // Patch goSec
@@ -3079,6 +3112,12 @@ function goSec(id,btn){
   document.querySelectorAll('.sb-item').forEach(b=>b.classList.remove('active'));
   const sc=['home','live'].includes(id);
   {var __el=document.getElementById('chat-panel');if(__el)__el.style.display=sc?'flex':'none';}
+  // Ejecutar render pendiente de Alitr cuando la sección TV es visible
+  if((id==='tv'||id==='alitr') && window._pendingAlitrRender){
+    var fn=window._pendingAlitrRender;
+    window._pendingAlitrRender=null;
+    setTimeout(fn, 80);
+  }
 }
 
 // PLAYER
