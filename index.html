@@ -206,15 +206,19 @@ function loadFromUrl() {
   var raw = document.getElementById('m3u-input').value.trim();
   if (!raw) { alert('Ingresa una URL de lista M3U'); return; }
 
-  // Intentar corsproxy si la URL no es del mismo origen
-  setStats('⏳ Cargando...');
-  var attempts = [raw, 'https://corsproxy.io/?' + encodeURIComponent(raw)];
+  setStats('⏳ Cargando lista...');
+  var attempts = [
+    raw,
+    'https://corsproxy.io/?' + encodeURIComponent(raw),
+    'https://api.allorigins.win/raw?url=' + encodeURIComponent(raw),
+    'https://thingproxy.freeboard.io/fetch/' + raw
+  ];
   tryFetchM3U(attempts, 0);
 }
 
 function tryFetchM3U(urls, idx) {
   if (idx >= urls.length) {
-    setStats('❌ No se pudo cargar la lista');
+    setStats('❌ No se pudo cargar — intenta con el archivo descargado');
     return;
   }
   fetch(urls[idx])
@@ -223,8 +227,10 @@ function tryFetchM3U(urls, idx) {
       return r.text();
     })
     .then(function(text) {
+      if (text.includes('not in allowlist') || text.includes('Forbidden') || text.includes('Access Denied')) {
+        throw new Error('Bloqueado por proxy');
+      }
       if (!text.includes('#EXTINF') && !text.includes('#EXTM3U')) {
-        // Puede ser que sea texto plano de error
         throw new Error('No es una lista M3U válida');
       }
       applyChannels(parseM3U(text));
@@ -288,12 +294,9 @@ function renderChannelList() {
 
   var el = document.getElementById('channel-list');
   if (!allChannels.length) {
-    document.getElementById('empty').style.display = 'block';
-    el.innerHTML = '';
-    el.appendChild(document.getElementById('empty'));
+    el.innerHTML = '<div class="ch-count" style="padding:20px;text-align:center;color:var(--text2);font-size:13px;">Carga una lista M3U para ver los canales</div>';
     return;
   }
-  document.getElementById('empty').style.display = 'none';
 
   if (!list.length) {
     el.innerHTML = '<div class="ch-count">Sin resultados</div>';
